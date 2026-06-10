@@ -1,239 +1,198 @@
-🎥 Serverless WebRTC Matchmaker & Video Client
+# 🎥 Serverless WebRTC Matchmaker & Video Client
 
-A production-ready, low-latency serverless WebRTC signaling and matchmaking platform that dynamically pairs users for real-time video and audio communication.
+> A production-ready, low-latency serverless WebRTC signaling and matchmaking platform that dynamically pairs users for real-time video and audio communication.
 
-Unlike traditional architectures that rely on dedicated signaling servers, this solution uses a fully serverless approach with atomic Redis matchmaking and Supabase Realtime signaling, minimizing infrastructure costs while maintaining fast connection times.
+Unlike traditional architectures that rely on dedicated signaling servers, this solution uses a fully serverless approach with **atomic Redis matchmaking** and **Supabase Realtime signaling** — minimising infrastructure costs while maintaining fast connection times.
 
-⸻
+---
 
-🚀 Architecture Overview
+## 🚀 Architecture Overview
 
-The application is divided into three independent layers:
+The application is split into three independent layers:
 
-Infrastructure as Code (IaC)
+| Layer | Technology | Purpose |
+|---|---|---|
+| Infrastructure | Terraform | Provision and manage cloud resources |
+| Matchmaking | Upstash Redis | Atomic FIFO queue pairing |
+| Signaling | Supabase Realtime | SDP & ICE exchange over WebSocket |
+| Frontend | Next.js + Vercel | Edge-deployed client application |
 
-Infrastructure resources are provisioned and managed using Terraform, ensuring repeatable and consistent deployments.
+```
+┌─────────────┐         ┌─────────────┐
+│   Client A  │         │   Client B  │
+└──────┬──────┘         └──────┬──────┘
+       │                       │
+       ▼                       ▼
+┌──────────────────────────────────────┐
+│          Upstash Redis               │
+│       Matchmaking Queue              │
+└──────────────────┬───────────────────┘
+                   │
+                   ▼
+┌──────────────────────────────────────┐
+│         Supabase Realtime            │
+│         Signaling Channel            │
+│   (SDP Offer / Answer / ICE)         │
+└──────────────────────────────────────┘
+                   │
+                   ▼
+        Client A ⟷ WebRTC P2P ⟷ Client B
+```
 
-State Management & Matchmaking
+---
 
-Upstash Redis powers the matchmaking engine using an atomic FIFO queue pattern, allowing users to be paired quickly and reliably.
+## 🛠️ Tech Stack
 
-Signaling Layer
+| Category | Technology |
+|---|---|
+| Framework | Next.js (App Router) |
+| Language | TypeScript |
+| Matchmaking Queue | Upstash Redis |
+| Signaling | Supabase Realtime |
+| Infrastructure | Terraform |
+| Deployment | Vercel Edge |
+| Communication | WebRTC (P2P) |
 
-Supabase Realtime is used to exchange:
+---
 
-* SDP Offers
-* SDP Answers
-* ICE Candidates
+## 📋 Prerequisites
 
-between matched peers during WebRTC negotiation.
+Before running the project, make sure you have the following installed and configured:
 
-Frontend Deployment
+- [Node.js v20+](https://nodejs.org/)
+- [Terraform](https://developer.hashicorp.com/terraform/install)
+- [Upstash Account](https://upstash.com/)
+- [Supabase Account](https://supabase.com/)
+- [Vercel Account](https://vercel.com/)
 
-The client application is built with Next.js (App Router) and deployed globally using Vercel Edge Infrastructure.
+---
 
-⸻
+## ⚙️ Environment Variables
 
-🏗️ System Architecture
+Create a `.env.local` file inside the `web-client` directory:
 
-┌─────────────┐
-│   Client A  │
-└──────┬──────┘
-       │
-       ▼
-┌─────────────────────┐
-│   Upstash Redis     │
-│ Matchmaking Queue   │
-└─────────┬───────────┘
-          │
-          ▼
-┌─────────────────────┐
-│ Supabase Realtime   │
-│  Signaling Channel  │
-└─────────┬───────────┘
-          │
-          ▼
-┌─────────────┐
-│   Client B  │
-└─────────────┘
-After signaling completes:
-Client A ⟷ WebRTC P2P ⟷ Client B
-
-⸻
-
-🛠️ Tech Stack
-
-Category	Technology
-Framework	Next.js (App Router)
-Language	TypeScript
-State & Queue	Upstash Redis
-Signaling	Supabase Realtime
-Infrastructure	Terraform
-Deployment	Vercel
-Communication	WebRTC
-
-⸻
-
-📋 Prerequisites
-
-Before running the project, ensure the following are installed:
-
-* Node.js v20+
-* Terraform
-* Upstash Account
-* Supabase Account
-* Vercel Account
-
-⸻
-
-⚙️ Environment Variables
-
-Create a .env.local file inside the web-client directory.
-
+```env
 # Upstash Redis
 UPSTASH_REDIS_REST_URL=https://your-redis-instance.upstash.io
 UPSTASH_REDIS_REST_TOKEN=your_upstash_rest_token
+
 # Supabase
 NEXT_PUBLIC_SUPABASE_URL=https://your-project-id.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+```
 
-⸻
+---
 
-💻 Local Development
+## 💻 Local Development
 
-1. Clone Repository
+### 1. Clone the repository
 
+```bash
 git clone https://github.com/yourusername/webrtc-cloud-resume-project.git
 cd webrtc-cloud-resume-project/web-client
+```
 
-2. Install Dependencies
+### 2. Install dependencies
 
+```bash
 npm install
+```
 
-3. Start Development Server
+### 3. Start the development server
 
+```bash
 npm run dev
+```
 
-Open:
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-http://localhost:3000
+> **Testing matchmaking locally:** Open the app in two separate browser windows, two different browsers, or one normal window and one incognito window.
 
-To test matchmaking locally, open the application in:
+---
 
-* Two separate browser windows
-* Two different browsers
-* One browser and one incognito window
+## 🌐 Production Deployment (Vercel)
 
-⸻
+### Step 1 — Set the root directory
 
-🌐 Production Deployment (Vercel)
+Since Terraform files live at the repository root, Vercel needs to be pointed at the Next.js app folder.
 
-Step 1: Configure Root Directory
+```
+Project Settings → Build & Deployment → Root Directory
+```
 
-Since Terraform files exist at the repository root, Vercel must be pointed to the Next.js application folder.
+Set it to `web-client` and choose **Next.js** as the framework preset.
 
-Navigate to:
+### Step 2 — Add environment variables
 
-Project Settings
-→ Build & Deployment
-→ Root Directory
+```
+Project Settings → Environment Variables
+```
 
-Set:
+Add all values from your `.env.local` file.
 
-web-client
+### Step 3 — Disable deployment protection
 
-Framework Preset:
+To allow public access without requiring a Vercel login:
 
-Next.js
+```
+Project Settings → Deployment Protection → Vercel Authentication → OFF
+```
 
-Save the changes.
+### Step 4 — Redeploy
 
-⸻
+```
+Deployments → ⋯ → Redeploy
+```
 
-Step 2: Configure Environment Variables
+Vercel will rebuild with the updated configuration.
 
-Navigate to:
+---
 
-Project Settings
-→ Environment Variables
+## 🔄 Matchmaking Flow
 
-Add the values from your local .env.local file.
-
-⸻
-
-Step 3: Disable Deployment Protection
-
-To allow public access without requiring a Vercel account:
-
-Navigate to:
-
-Project Settings
-→ Deployment Protection
-→ Vercel Authentication
-
-Turn:
-
-OFF
-
-and save.
-
-⸻
-
-Step 4: Redeploy
-
-Navigate to:
-
-Deployments
-
-Select the latest deployment:
-
-⋯ → Redeploy
-
-Vercel will rebuild the application using the updated configuration.
-
-⸻
-
-🔄 Matchmaking Flow
-
+```
 1. User clicks Start
-2. User ID is added to the Upstash Redis queue
-3. Matchmaking API checks for waiting users
-4. Two users are paired atomically
-5. Supabase Realtime channel is created
-6. SDP Offer/Answer exchange begins
+       ↓
+2. User ID is pushed to the Upstash Redis queue
+       ↓
+3. Matchmaking API checks for a waiting user
+       ↓
+4. Two users are atomically paired
+       ↓
+5. A dedicated Supabase Realtime channel is created
+       ↓
+6. SDP Offer / Answer exchange begins
+       ↓
 7. ICE candidates are exchanged
-8. Direct WebRTC connection is established
-9. Audio and video stream peer-to-peer
+       ↓
+8. Direct WebRTC P2P connection is established
+       ↓
+9. Audio & video stream peer-to-peer 🎥
+```
 
-⸻
+---
 
-🔒 Scalability Benefits
+## 🔒 Scalability & Security
 
-Serverless Matchmaking
+### Serverless Matchmaking
+- No dedicated signaling server to maintain
+- No always-on WebSocket infrastructure
+- Scales automatically with demand
+- Minimal operational cost
 
-* No dedicated signaling server
-* No always-on WebSocket infrastructure
-* Automatic scaling
-* Low operational costs
+### Atomic Redis Operations
+- Prevents duplicate matches
+- Eliminates race conditions under load
+- Maintains strict FIFO pairing order
 
-Atomic Redis Operations
+### Direct Peer Connections
+Once signaling completes, **media traffic never touches your backend** — it flows directly browser-to-browser.
 
-* Prevents duplicate matches
-* Eliminates race conditions
-* Maintains FIFO pairing
+---
 
-Direct Peer Connections
+## 📂 Project Structure
 
-Once signaling completes:
-
-Browser ⇄ Browser
-
-Media traffic never passes through your backend.
-
-⸻
-
-📂 Project Structure
-
+```
 webrtc-cloud-resume-project/
 │
 ├── terraform/
@@ -250,43 +209,42 @@ webrtc-cloud-resume-project/
 │   └── next.config.js
 │
 └── README.md
+```
 
-⸻
+---
 
-🛡️ Git Workflow
+## 🛡️ Git Housekeeping
 
-Remove Accidental Nested Git Repositories
+If you accidentally end up with a nested `.git` repo inside `web-client`:
 
+```bash
+# Remove the nested git repo
 rm -rf web-client/.git
 
-Clear Cached Tracking
-
+# Clear cached tracking
 git rm --cached web-client -f
 
-Commit Changes
-
+# Commit and push
 git add .
-git commit -m "Deployment optimization"
+git commit -m "fix: remove nested git repository"
 git push origin master
+```
 
-⸻
+---
 
-🎯 Key Features
+## 🎯 Key Features
 
-* Real-time video chat
-* WebRTC peer-to-peer communication
-* Serverless matchmaking
-* Atomic Redis queue pairing
-* Supabase Realtime signaling
-* Infrastructure as Code with Terraform
-* Edge deployment via Vercel
-* Low-latency connection establishment
-* Horizontally scalable architecture
+- ⚡ Real-time peer-to-peer video & audio
+- 🔀 Serverless atomic matchmaking via Redis
+- 📡 Supabase Realtime WebRTC signaling
+- 🌍 Global edge deployment via Vercel
+- 🏗️ Infrastructure as Code with Terraform
+- 📉 Low-latency connection establishment
+- ↔️ Horizontally scalable — no bottlenecks
 
-⸻
+---
 
-📜 License
+## 📜 License
 
-This project is provided for educational and portfolio purposes.
-
+This project is provided for **educational and portfolio purposes**.  
 Feel free to fork, modify, and build upon it.
