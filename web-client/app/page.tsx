@@ -1,11 +1,14 @@
 'use client'
+
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { supabase } from './supabase'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
 type AppState = 'idle' | 'camera' | 'searching' | 'waiting' | 'connecting' | 'connected' | 'disconnected' | 'error'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
+
 const RTC_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -18,12 +21,14 @@ const RTC_CONFIG: RTCConfiguration = {
 const MY_ID = Math.random().toString(36).substring(2, 10)
 
 // ─── Component ────────────────────────────────────────────────────────────────
+
 export default function Home() {
   const [appState, setAppState] = useState<AppState>('idle')
   const [partnerId, setPartnerId] = useState<string | null>(null)
   const [connectionTime, setConnectionTime] = useState(0)
   const [isMuted, setIsMuted] = useState(false)
   const [isCamOff, setIsCamOff] = useState(false)
+  const [localIsMain, setLocalIsMain] = useState(false) // Track which video is expanded
 
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const remoteVideoRef = useRef<HTMLVideoElement>(null)
@@ -73,6 +78,7 @@ export default function Home() {
 
     setPartnerId(null)
     setConnectionTime(0)
+    setLocalIsMain(false)
   }, [])
 
   // ── Stop camera entirely ────────────────────────────────────────────────────
@@ -200,8 +206,6 @@ export default function Home() {
       return
     }
 
-    // data.match = the ID of the user we matched with (we are CALLER)
-    // data.waitRoomId = we are waiting in queue as this room (we are CALLEE)
     const isCaller = !!data.match
     const roomId = isCaller ? data.match! : data.waitRoomId ?? MY_ID
 
@@ -214,7 +218,7 @@ export default function Home() {
 
     // ── Open Supabase Realtime channel ─────────────────────────────────────────
     const channel = supabase.channel(`room_${roomId}`, {
-      config: { broadcast: { self: false } } // CRITICAL: don't receive our own messages
+      config: { broadcast: { self: false } }
     })
     channelRef.current = channel
 
@@ -222,11 +226,8 @@ export default function Home() {
     const pc = createPeerConnection(localStream, channel, isCaller)
 
     // ── Signaling listeners ────────────────────────────────────────────────────
-
-    // Callee woken up: someone joined, start the handshake
     channel.on('broadcast', { event: 'joined' }, async ({ payload }: any) => {
       if (!isCaller) {
-        // We're the callee, someone matched with us — now WE become the caller
         setPartnerId(payload.callerId)
         setAppState('connecting')
         const offer = await pc.createOffer()
@@ -239,9 +240,8 @@ export default function Home() {
       }
     })
 
-    // Offer received (callee → caller flow or direct)
     channel.on('broadcast', { event: 'offer' }, async ({ payload }: any) => {
-      if (payload.from === MY_ID) return // ignore our own
+      if (payload.from === MY_ID) return
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(payload.offer))
         remoteDescSetRef.current = true
@@ -258,7 +258,6 @@ export default function Home() {
       }
     })
 
-    // Answer received
     channel.on('broadcast', { event: 'answer' }, async ({ payload }: any) => {
       if (payload.from === MY_ID) return
       try {
@@ -270,7 +269,6 @@ export default function Home() {
       }
     })
 
-    // ICE candidates — queue them if remote description not yet set
     channel.on('broadcast', { event: 'ice-candidate' }, async ({ payload }: any) => {
       if (payload.from === MY_ID) return
       if (!payload.candidate) return
@@ -281,30 +279,24 @@ export default function Home() {
           console.warn('ICE add error:', e)
         }
       } else {
-        // Buffer it — remote description not ready yet
         iceCandidateQueueRef.current.push(payload.candidate)
       }
     })
 
-    // Partner disconnected
     channel.on('broadcast', { event: 'disconnect' }, () => {
       setAppState('disconnected')
       cleanup()
     })
 
-    // ── Subscribe and initiate if caller ──────────────────────────────────────
     channel.subscribe(async (status: string) => {
       if (status !== 'SUBSCRIBED') return
 
       if (isCaller) {
-        // Notify the waiting user that we've joined
         channel.send({
           type: 'broadcast',
           event: 'joined',
           payload: { callerId: MY_ID }
         })
-        // Give a tiny tick so the callee's 'joined' listener fires and they send offer
-        // If callee doesn't respond in 500ms, we send the offer ourselves as fallback
         setTimeout(async () => {
           if (pc.signalingState === 'stable' && !pc.remoteDescription) {
             try {
@@ -334,7 +326,6 @@ export default function Home() {
       })
     }
     await cleanup()
-    // Re-enter matchmaking automatically
     findMatch()
   }, [cleanup, findMatch])
 
@@ -386,14 +377,14 @@ export default function Home() {
   }
 
   const statusLabel: Record<AppState, string> = {
-    idle: 'Ready to connect',
-    camera: 'Starting camera...',
-    searching: 'Finding someone...',
+    idle: 'Ready to say hi?',
+    camera: 'Warming up camera...',
+    searching: 'Looking for someone...',
     waiting: 'Waiting for a match...',
     connecting: 'Connecting...',
-    connected: `Connected ${formatTime(connectionTime)}`,
-    disconnected: 'Disconnected',
-    error: 'Camera permission denied'
+    connected: `Chatting ${formatTime(connectionTime)}`,
+    disconnected: 'They stepped away',
+    error: 'Camera permission needed'
   }
 
   const isConnected = appState === 'connected'
@@ -403,213 +394,113 @@ export default function Home() {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@500;600;700&family=Nunito:wght@400;600;700&display=swap');
 
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
         :root {
-          --bg: #080a0f;
-          --surface: #0e1117;
-          --border: rgba(255,255,255,0.07);
-          --text: #e8eaf0;
-          --muted: rgba(232,234,240,0.4);
-          --accent: #00e5ff;
-          --accent-dim: rgba(0,229,255,0.12);
-          --accent-glow: rgba(0,229,255,0.3);
-          --danger: #ff3b5c;
-          --danger-dim: rgba(255,59,92,0.12);
-          --success: #00e096;
-          --warn: #ffb800;
+          /* New Theme Variables */
+          --bg: #21243D;
+          --surface: #2b2f4c;
+          --surface-glass: rgba(43, 47, 76, 0.7);
+          --text: #FFFFFF;
+          --muted: #A0AEC0;
+          --accent: #FF7C7C;
+          --accent-hover: #fa6666;
+          --accent-minor: #FFD082;
+          --danger: #FF7C7C;
+          --success: #48BB78;
+          
+          --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+          --shadow-lg: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+          --shadow-xl: 0 20px 40px -10px rgba(0, 0, 0, 0.6);
         }
 
-        body { background: var(--bg); }
+        body { 
+          background: var(--bg); 
+          color: var(--text);
+          font-family: 'Nunito', sans-serif;
+          -webkit-font-smoothing: antialiased;
+        }
 
         .app {
-          font-family: 'Syne', sans-serif;
           min-height: 100dvh;
-          background: var(--bg);
-          color: var(--text);
           display: flex;
           flex-direction: column;
           align-items: center;
-          padding: 20px 16px 32px;
+          padding: 16px;
           position: relative;
-          overflow: hidden;
         }
 
-        /* Animated background grid */
-        .app::before {
-          content: '';
-          position: fixed;
-          inset: 0;
-          background-image:
-            linear-gradient(rgba(0,229,255,0.03) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(0,229,255,0.03) 1px, transparent 1px);
-          background-size: 40px 40px;
-          animation: gridDrift 20s linear infinite;
-          pointer-events: none;
-          z-index: 0;
-        }
-
-        /* Ambient glow orbs */
-        .app::after {
-          content: '';
-          position: fixed;
-          width: 600px;
-          height: 600px;
-          background: radial-gradient(circle, rgba(0,229,255,0.04) 0%, transparent 70%);
-          top: -200px;
-          left: 50%;
-          transform: translateX(-50%);
-          pointer-events: none;
-          z-index: 0;
-        }
-
-        @keyframes gridDrift {
-          0% { background-position: 0 0; }
-          100% { background-position: 40px 40px; }
-        }
-
-        /* ── Header ── */
-        .header {
-          position: relative;
-          z-index: 1;
-          text-align: center;
-          margin-bottom: 24px;
+        /* ── Header & Status Bar ── */
+        .top-bar {
           width: 100%;
-          max-width: 960px;
+          max-width: 1200px;
           display: flex;
-          align-items: center;
           justify-content: space-between;
+          align-items: center;
+          padding: 12px 24px;
+          background: var(--surface);
+          border-radius: 100px;
+          box-shadow: var(--shadow-sm);
+          margin-bottom: 16px;
+          z-index: 10;
         }
 
         .logo {
+          font-family: 'Quicksand', sans-serif;
+          font-size: 24px;
+          font-weight: 700;
+          color: var(--accent);
+          letter-spacing: -0.5px;
           display: flex;
-          align-items: baseline;
+          align-items: center;
           gap: 6px;
         }
 
-        .logo-word {
-          font-size: 22px;
-          font-weight: 800;
-          letter-spacing: -0.5px;
-          color: var(--text);
-        }
-
-        .logo-dot {
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
-          background: var(--accent);
-          box-shadow: 0 0 12px var(--accent-glow);
-          animation: pulse 2s ease-in-out infinite;
-          display: inline-block;
-          margin-left: 2px;
-          vertical-align: middle;
-        }
-
-        @keyframes pulse {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.6; transform: scale(0.8); }
-        }
-
-        .user-id {
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 11px;
-          color: var(--muted);
-          background: var(--surface);
-          border: 1px solid var(--border);
-          padding: 4px 10px;
-          border-radius: 20px;
-        }
-
-        /* ── Status bar ── */
-        .status-bar {
-          position: relative;
-          z-index: 1;
-          width: 100%;
-          max-width: 960px;
-          margin-bottom: 16px;
+        .status-container {
           display: flex;
           align-items: center;
-          gap: 10px;
-          background: var(--surface);
-          border: 1px solid var(--border);
-          border-radius: 12px;
-          padding: 10px 16px;
+          gap: 8px;
+          font-weight: 600;
+          color: var(--text);
         }
 
         .status-dot {
-          width: 8px;
-          height: 8px;
+          width: 10px;
+          height: 10px;
           border-radius: 50%;
-          flex-shrink: 0;
           transition: background 0.3s;
         }
-
         .status-dot.idle { background: var(--muted); }
-        .status-dot.searching, .status-dot.waiting, .status-dot.connecting {
-          background: var(--warn);
-          animation: blink 1s ease-in-out infinite;
-        }
-        .status-dot.connected { background: var(--success); box-shadow: 0 0 8px var(--success); }
-        .status-dot.disconnected { background: var(--danger); }
-        .status-dot.error { background: var(--danger); }
-        .status-dot.camera { background: var(--warn); }
+        .status-dot.searching, .status-dot.waiting, .status-dot.connecting { background: var(--accent-minor); animation: pulse 1.5s infinite; }
+        .status-dot.connected { background: var(--success); }
+        .status-dot.disconnected, .status-dot.error { background: var(--danger); }
 
-        @keyframes blink {
+        @keyframes pulse {
           0%, 100% { opacity: 1; }
-          50% { opacity: 0.3; }
-        }
-
-        .status-text {
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 13px;
-          color: var(--text);
-          flex: 1;
-        }
-
-        .partner-badge {
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 11px;
-          color: var(--accent);
-          background: var(--accent-dim);
-          border: 1px solid rgba(0,229,255,0.2);
-          padding: 3px 8px;
-          border-radius: 20px;
+          50% { opacity: 0.5; }
         }
 
         /* ── Video Stage ── */
         .stage {
           position: relative;
-          z-index: 1;
           width: 100%;
-          max-width: 960px;
-          display: grid;
-          grid-template-columns: 1fr;
-          gap: 12px;
+          max-width: 1400px;
+          flex: 1;
+          background: var(--surface);
+          border-radius: 32px;
+          box-shadow: var(--shadow-lg);
+          overflow: hidden;
           margin-bottom: 16px;
         }
 
-        @media (min-width: 640px) {
-          .stage {
-            grid-template-columns: 1fr 280px;
-            grid-template-rows: auto;
-          }
-        }
-
-        /* Remote video */
         .video-card {
-          position: relative;
-          background: var(--surface);
-          border: 1px solid var(--border);
-          border-radius: 16px;
+          position: absolute;
+          border-radius: 32px;
           overflow: hidden;
-          aspect-ratio: 16/9;
-        }
-
-        .video-card.remote {
-          border-color: rgba(0,229,255,0.15);
+          background: var(--surface);
+          transition: all 0.5s cubic-bezier(0.25, 1, 0.5, 1);
         }
 
         .video-card video {
@@ -623,7 +514,41 @@ export default function Home() {
           transform: scaleX(-1);
         }
 
-        /* Placeholder when no video */
+        /* Main Fullscreen Video */
+        .video-card.main {
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          z-index: 1;
+          border-radius: 32px;
+        }
+
+        /* Picture-in-Picture Video */
+        .video-card.pip {
+          bottom: 100px; /* Leave room for controls */
+          right: 24px;
+          width: 160px;
+          height: 240px;
+          z-index: 5;
+          border: 4px solid var(--surface);
+          box-shadow: var(--shadow-xl);
+          cursor: pointer;
+        }
+
+        @media (min-width: 768px) {
+          .video-card.pip {
+            width: 220px;
+            height: 310px;
+            bottom: 32px;
+            right: 32px;
+          }
+        }
+
+        .video-card.pip:hover {
+          transform: scale(1.05);
+        }
+
+        /* Placeholder Content */
         .video-placeholder {
           position: absolute;
           inset: 0;
@@ -631,220 +556,135 @@ export default function Home() {
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          gap: 12px;
+          gap: 16px;
+          background: var(--surface);
         }
 
-        .avatar-ring {
-          width: 72px;
-          height: 72px;
+        .avatar-circle {
+          width: 80px;
+          height: 80px;
           border-radius: 50%;
-          border: 2px solid var(--border);
+          background: var(--bg);
           display: flex;
           align-items: center;
           justify-content: center;
-          position: relative;
-        }
-
-        .avatar-ring.searching {
-          border-color: var(--warn);
-          animation: spin-ring 2s linear infinite;
-        }
-
-        @keyframes spin-ring {
-          0% { box-shadow: 0 0 0 0 rgba(255,184,0,0.4); }
-          50% { box-shadow: 0 0 0 8px rgba(255,184,0,0); }
-          100% { box-shadow: 0 0 0 0 rgba(255,184,0,0); }
-        }
-
-        .avatar-icon {
-          font-size: 28px;
-          opacity: 0.3;
+          font-size: 32px;
+          box-shadow: var(--shadow-sm);
+          color: var(--accent-minor);
         }
 
         .placeholder-label {
-          font-size: 13px;
+          font-family: 'Quicksand', sans-serif;
+          font-size: 16px;
+          font-weight: 600;
           color: var(--muted);
-          font-family: 'JetBrains Mono', monospace;
         }
 
-        /* Scanning line effect */
-        .video-card.remote.searching::after {
-          content: '';
-          position: absolute;
-          left: 0;
-          right: 0;
-          height: 2px;
-          background: linear-gradient(90deg, transparent, var(--accent), transparent);
-          animation: scanline 2s linear infinite;
-          top: 0;
-        }
-
-        @keyframes scanline {
-          0% { top: 0%; opacity: 1; }
-          100% { top: 100%; opacity: 0; }
-        }
-
-        /* Video label */
+        /* Labels over video */
         .video-label {
           position: absolute;
-          top: 12px;
-          left: 12px;
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 11px;
+          top: 16px;
+          left: 16px;
+          font-weight: 700;
+          font-size: 12px;
           color: var(--text);
-          background: rgba(8,10,15,0.7);
+          background: var(--surface-glass);
           backdrop-filter: blur(8px);
-          padding: 4px 10px;
-          border-radius: 20px;
-          border: 1px solid var(--border);
+          padding: 6px 14px;
+          border-radius: 100px;
+          box-shadow: var(--shadow-sm);
+          border: 1px solid rgba(255, 255, 255, 0.05);
         }
 
-        /* Live indicator */
-        .live-badge {
+        /* ── Controls Overlay ── */
+        .controls-wrapper {
           position: absolute;
-          top: 12px;
-          right: 12px;
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 10px;
-          font-weight: 500;
-          color: #fff;
-          background: var(--danger);
-          padding: 3px 8px;
-          border-radius: 20px;
+          bottom: 24px;
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 10;
           display: flex;
-          align-items: center;
-          gap: 4px;
-        }
-
-        .live-badge::before {
-          content: '';
-          width: 5px;
-          height: 5px;
-          border-radius: 50%;
-          background: #fff;
-          animation: blink 1s ease-in-out infinite;
-        }
-
-        /* ── Controls ── */
-        .controls {
-          position: relative;
-          z-index: 1;
-          width: 100%;
-          max-width: 960px;
-          display: flex;
-          gap: 10px;
-          flex-wrap: wrap;
-          justify-content: center;
+          gap: 12px;
+          background: var(--surface-glass);
+          backdrop-filter: blur(12px);
+          padding: 12px 20px;
+          border-radius: 100px;
+          box-shadow: var(--shadow-lg);
+          border: 1px solid rgba(255, 255, 255, 0.05);
         }
 
         .btn {
-          font-family: 'Syne', sans-serif;
+          font-family: 'Quicksand', sans-serif;
           font-weight: 700;
-          font-size: 14px;
-          letter-spacing: 0.3px;
+          font-size: 15px;
           border: none;
-          border-radius: 12px;
+          border-radius: 100px;
           cursor: pointer;
           padding: 12px 24px;
-          transition: all 0.15s ease;
+          transition: all 0.2s ease;
           display: flex;
           align-items: center;
           gap: 8px;
-          position: relative;
-          overflow: hidden;
         }
 
-        .btn:active { transform: scale(0.97); }
-        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn:active { transform: scale(0.95); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
         .btn-primary {
           background: var(--accent);
-          color: #000;
-          box-shadow: 0 0 24px var(--accent-glow), 0 4px 12px rgba(0,0,0,0.3);
+          color: #fff;
+          box-shadow: 0 4px 14px rgba(255, 124, 124, 0.3);
+        }
+        .btn-primary:hover:not(:disabled) { 
+          background: var(--accent-hover); 
+          transform: translateY(-2px); 
         }
 
-        .btn-primary:hover:not(:disabled) {
-          box-shadow: 0 0 36px var(--accent-glow), 0 4px 16px rgba(0,0,0,0.3);
-          background: #1af0ff;
-        }
-
-        .btn-ghost {
-          background: var(--surface);
+        .btn-secondary {
+          background: rgba(255, 255, 255, 0.1);
           color: var(--text);
-          border: 1px solid var(--border);
         }
-
-        .btn-ghost:hover:not(:disabled) {
-          border-color: rgba(255,255,255,0.15);
-          background: rgba(255,255,255,0.05);
-        }
-
-        .btn-ghost.active {
-          background: var(--accent-dim);
-          border-color: rgba(0,229,255,0.25);
-          color: var(--accent);
+        .btn-secondary:hover { background: rgba(255, 255, 255, 0.15); }
+        .btn-secondary.active { 
+          background: var(--accent); 
+          color: #fff; 
         }
 
         .btn-danger {
-          background: var(--danger-dim);
-          color: var(--danger);
-          border: 1px solid rgba(255,59,92,0.2);
+          background: rgba(255, 124, 124, 0.15);
+          color: var(--accent);
+          border: 1px solid rgba(255, 124, 124, 0.3);
         }
-
-        .btn-danger:hover:not(:disabled) {
-          background: rgba(255,59,92,0.2);
-          box-shadow: 0 0 16px rgba(255,59,92,0.2);
-        }
+        .btn-danger:hover { background: rgba(255, 124, 124, 0.25); }
 
         .btn-skip {
-          background: rgba(255,184,0,0.1);
-          color: var(--warn);
-          border: 1px solid rgba(255,184,0,0.2);
+          background: rgba(255, 208, 130, 0.15);
+          color: var(--accent-minor);
+          border: 1px solid rgba(255, 208, 130, 0.3);
         }
+        .btn-skip:hover { background: rgba(255, 208, 130, 0.25); }
 
-        .btn-skip:hover:not(:disabled) {
-          background: rgba(255,184,0,0.18);
-        }
-
-        /* ── Footer ── */
-        .footer {
-          position: relative;
-          z-index: 1;
-          margin-top: 24px;
-          font-size: 11px;
-          color: var(--muted);
-          font-family: 'JetBrains Mono', monospace;
-          text-align: center;
-        }
-
-        /* ── Responsive ── */
-        @media (max-width: 639px) {
-          .controls { gap: 8px; }
-          .btn { padding: 11px 18px; font-size: 13px; }
-        }
       `}</style>
 
       <main className="app">
-        {/* ── Header ── */}
-        <header className="header">
+        {/* ── Top Bar ── */}
+        <header className="top-bar">
           <div className="logo">
-            <span className="logo-word">strangr</span>
-            <span className="logo-dot" />
+            👋 strangr
           </div>
-          <span className="user-id">#{MY_ID}</span>
+          <div className="status-container">
+            <div className={`status-dot ${appState}`} />
+            <span>{statusLabel[appState]}</span>
+          </div>
         </header>
-
-        {/* ── Status Bar ── */}
-        <div className="status-bar">
-          <div className={`status-dot ${appState}`} />
-          <span className="status-text">{statusLabel[appState]}</span>
-          {partnerId && <span className="partner-badge">#{partnerId}</span>}
-        </div>
 
         {/* ── Video Stage ── */}
         <div className="stage">
-          {/* Remote */}
-          <div className={`video-card remote ${!isConnected ? appState : ''}`}>
+          {/* Remote Video Container */}
+          <div 
+            className={`video-card remote ${localIsMain ? 'pip' : 'main'}`}
+            onClick={() => localIsMain && setLocalIsMain(false)}
+          >
             <video
               ref={remoteVideoRef}
               autoPlay
@@ -853,30 +693,27 @@ export default function Home() {
             />
             {!isConnected && (
               <div className="video-placeholder">
-                <div className={`avatar-ring ${appState === 'searching' || appState === 'waiting' || appState === 'connecting' ? 'searching' : ''}`}>
-                  <span className="avatar-icon">
-                    {appState === 'idle' || appState === 'camera' ? '👤' : '⌛'}
-                  </span>
+                <div className="avatar-circle">
+                  {appState === 'idle' ? '☕' : appState === 'searching' ? '🔍' : '⏳'}
                 </div>
                 <span className="placeholder-label">
-                  {appState === 'idle' ? 'no one yet' :
-                   appState === 'camera' ? 'starting up...' :
-                   appState === 'searching' ? 'scanning...' :
-                   appState === 'waiting' ? 'in queue...' :
-                   appState === 'connecting' ? 'handshaking...' :
-                   appState === 'disconnected' ? 'disconnected' :
-                   appState === 'error' ? 'check permissions' : ''}
+                  {appState === 'idle' ? 'Ready when you are' :
+                   appState === 'searching' ? 'Finding a friendly face...' :
+                   appState === 'waiting' ? 'Waiting for someone...' :
+                   appState === 'connecting' ? 'Say hi! 👋' : 'Looking for connection...'}
                 </span>
               </div>
             )}
             <div className="video-label">
-              {partnerId ? `#${partnerId}` : 'stranger'}
+              {partnerId ? `Stranger` : 'Stranger'}
             </div>
-            {isConnected && <div className="live-badge">LIVE</div>}
           </div>
 
-          {/* Local */}
-          <div className="video-card local">
+          {/* Local Video Container */}
+          <div 
+            className={`video-card local ${!localIsMain ? 'pip' : 'main'}`}
+            onClick={() => !localIsMain && setLocalIsMain(true)}
+          >
             <video
               ref={localVideoRef}
               autoPlay
@@ -886,69 +723,63 @@ export default function Home() {
             />
             {!localStreamRef.current && (
               <div className="video-placeholder">
-                <div className="avatar-ring">
-                  <span className="avatar-icon">📷</span>
-                </div>
-                <span className="placeholder-label">you</span>
+                <div className="avatar-circle">😊</div>
+                <span className="placeholder-label">You</span>
               </div>
             )}
-            <div className="video-label">you</div>
+            <div className="video-label">You</div>
+          </div>
+
+          {/* ── Controls Overlay ── */}
+          <div className="controls-wrapper">
+            {/* Start / Find Match */}
+            {!isActive && (
+              <button
+                className="btn btn-primary"
+                onClick={findMatch}
+                disabled={appState === 'camera'}
+              >
+                {appState === 'idle' ? '✨ Start Chatting' :
+                 appState === 'disconnected' ? '🔄 Find New Match' :
+                 appState === 'error' ? '🔄 Try Again' : '...'}
+              </button>
+            )}
+
+            {/* Skip */}
+            {isConnected && (
+              <button className="btn btn-skip" onClick={skip}>
+                ⏭️ Next
+              </button>
+            )}
+
+            {/* Mic Toggle */}
+            {isActive && (
+              <button
+                className={`btn btn-secondary ${isMuted ? 'active' : ''}`}
+                onClick={toggleMute}
+              >
+                {isMuted ? '🔇 Muted' : '🎙️ Mic On'}
+              </button>
+            )}
+
+            {/* Camera Toggle */}
+            {isActive && (
+              <button
+                className={`btn btn-secondary ${isCamOff ? 'active' : ''}`}
+                onClick={toggleCam}
+              >
+                {isCamOff ? '📷 Cam Off' : '📸 Cam On'}
+              </button>
+            )}
+
+            {/* Leave */}
+            {isActive && (
+              <button className="btn btn-danger" onClick={disconnect}>
+                ❌ Leave
+              </button>
+            )}
           </div>
         </div>
-
-        {/* ── Controls ── */}
-        <div className="controls">
-          {/* Start / Find Match */}
-          {!isActive && (
-            <button
-              className="btn btn-primary"
-              onClick={findMatch}
-              disabled={appState === 'camera'}
-            >
-              {appState === 'idle' ? '⚡ Start & Match' :
-               appState === 'disconnected' ? '↺ Find New Match' :
-               appState === 'error' ? '↺ Try Again' : '…'}
-            </button>
-          )}
-
-          {/* Skip to next (when connected) */}
-          {isConnected && (
-            <button className="btn btn-skip" onClick={skip}>
-              ⏭ Next
-            </button>
-          )}
-
-          {/* Mute / Unmute */}
-          {isActive && (
-            <button
-              className={`btn btn-ghost ${isMuted ? 'active' : ''}`}
-              onClick={toggleMute}
-            >
-              {isMuted ? '🔇 Unmute' : '🎙 Mute'}
-            </button>
-          )}
-
-          {/* Cam on/off */}
-          {isActive && (
-            <button
-              className={`btn btn-ghost ${isCamOff ? 'active' : ''}`}
-              onClick={toggleCam}
-            >
-              {isCamOff ? '📷 Cam On' : '📷 Cam Off'}
-            </button>
-          )}
-
-          {/* Disconnect */}
-          {isActive && (
-            <button className="btn btn-danger" onClick={disconnect}>
-              ✕ Leave
-            </button>
-          )}
-        </div>
-
-        <footer className="footer">
-          end-to-end encrypted · peer-to-peer · no recording
-        </footer>
       </main>
     </>
   )
