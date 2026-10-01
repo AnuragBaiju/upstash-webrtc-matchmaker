@@ -1,0 +1,3 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is git-ignored - never commit it.
+upstash_email   = "you@example.com"
+upstash_api_key = "your-upstash-management-api-key"
