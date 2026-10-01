@@ -1,0 +1,10 @@
+# Terraform local state, cache and variables (contain secrets)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+
+# OS
+.DS_Store
